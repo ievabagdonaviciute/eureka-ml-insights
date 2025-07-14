@@ -214,8 +214,13 @@ class MMDataLoader(DataLoader):
         """
         # prepend the local path prefix
         full_image_file_path = os.path.join(self.mm_data_path_prefix, image_file_name)
-        query_image = Image.open(full_image_file_path).convert("RGB")
-        return query_image
+
+        # added the next two lines to support video files
+        if full_image_file_path.endswith(".mp4"): # if it is a video, we return the path
+            return full_image_file_path
+        else:
+            query_image = Image.open(full_image_file_path).convert("RGB")
+            return query_image
 
 
 class AzureDataAuthenticator:

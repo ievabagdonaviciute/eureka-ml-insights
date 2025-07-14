@@ -1,0 +1,25 @@
+We asked a large language model the following question:
+
+BEGIN INITIAL QUESTION
+
+Question: {{original_prompt}}
+
+END INITIAL QUESTION
+
+The question asks the model to give a final answer in the format of **true** or **false**.
+
+However, the model failed to follow the specified format and gave the following response:
+
+BEGIN RAW MODEL ANSWER
+
+Raw Model Answer: {{raw_output}}
+
+END RAW MODEL ANSWER
+
+Your task is to extract the final answer strictly as either **true** or **false** based on the meaning of the response.
+
+- If the model clearly indicates "true" (or equivalent, like "yes"), return **true**.
+- If the model clearly indicates "false" (or equivalent, like "no"), return **false**.
+- If you cannot determine the answer with confidence, or the model is unsure, return **null**.
+
+Respond with only one word: `true`, `false`, or `no answer`. Do not include any explanation.

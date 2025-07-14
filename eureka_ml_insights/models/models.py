@@ -12,10 +12,9 @@ from dataclasses import dataclass
 import anthropic
 import requests
 import tiktoken
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from azure.identity import AzureCliCredential, get_bearer_token_provider
 
 from eureka_ml_insights.secret_management import get_secret
-
 
 @dataclass
 class Model(ABC):
@@ -271,7 +270,7 @@ class ServerlessAzureRestEndpointModel(EndpointModel, KeyBasedAuthMixIn):
                 "extra-parameters": "pass-through",
             }
         except ValueError:
-            self.bearer_token_provider = get_bearer_token_provider(DefaultAzureCredential(), self.auth_scope)
+            self.bearer_token_provider = get_bearer_token_provider(AzureCliCredential(), self.auth_scope)
             self.headers = {
                 "Content-Type": "application/json",
                 "Authorization": ("Bearer " + self.bearer_token_provider()),
@@ -341,6 +340,11 @@ class LlamaServerlessAzureRestEndpointModel(ServerlessAzureRestEndpointModel):
             if len(query_images) > 1:
                 raise ValueError("Llama vision model does not support more than 1 image.")
             encoded_images = self.base64encode(query_images)
+
+
+            print("LLAMA_SERVE: Number of images passed:", len(encoded_images))
+            print("LLAMA_SERVE: Image used for input:", encoded_images[0])
+
             user_content = [
                 {"type": "text", "text": text_prompt},
                 {
@@ -453,15 +457,32 @@ class OpenAICommonRequestResponseMixIn:
         user_content = text_prompt
         if query_images:
             encoded_images = self.base64encode(query_images)
-            user_content = [
-                {"type": "text", "text": text_prompt},
+
+
+            #print("OPENAI_COMMON: Number of images passed:", len(encoded_images))
+            #print("OPENAI_COMMON: Image used for input:", encoded_images[0])
+
+
+            # user_content = [
+            #     {"type": "text", "text": text_prompt},
+            #     {
+            #         "type": "image_url",
+            #         "image_url": {
+            #             "url": f"data:image/png;base64,{encoded_images[0]}", 
+            #         },
+            #     },
+            # ]
+            
+            user_content = [{"type": "text", "text": text_prompt}]
+            user_content.extend([
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/png;base64,{encoded_images[0]}",
+                        "url": f"data:image/png;base64,{img}" #CHANGED THIS FROM [0]
                     },
-                },
-            ]
+                } for img in encoded_images # added loop
+            ])
+
         messages.append({"role": "user", "content": user_content})
         request_body = {"messages": messages}
         for kwarg in {"extra_body"}:
@@ -503,7 +524,7 @@ class AzureOpenAIClientMixIn:
     def get_client(self):
         from openai import AzureOpenAI
 
-        token_provider = get_bearer_token_provider(DefaultAzureCredential(), self.auth_scope)
+        token_provider = get_bearer_token_provider(AzureCliCredential(), self.auth_scope)
         return AzureOpenAI(
             azure_endpoint=self.url,
             api_version=self.api_version,
@@ -594,15 +615,29 @@ class OpenAIOModelsRequestResponseMixIn:
             logging.warning("Images are not supported by OpenAI O1 preview model.")
         elif query_images:
             encoded_images = self.base64encode(query_images)
-            user_content = [
-                {"type": "text", "text": text_prompt},
+
+            #print("OPENAI_O_MODEL_REQUEST_RESPONSE: Number of images passed:", len(encoded_images))
+            #print("OPENAI_O_MODEL_REQUEST_RESPONSE: Image used for input:", encoded_images[0])
+
+            # user_content = [
+            #     {"type": "text", "text": text_prompt},
+            #     {
+            #         "type": "image_url",
+            #         "image_url": {
+            #             "url": f"data:image/png;base64,{encoded_images[0]}",
+            #         },
+            #     },
+            # ]
+
+            user_content = [{"type": "text", "text": text_prompt}]
+            user_content.extend([
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/png;base64,{encoded_images[0]}",
+                        "url": f"data:image/png;base64,{img}" #CHANGED THIS FROM [0]
                     },
-                },
-            ]
+                } for img in encoded_images # added loop
+            ])
 
         messages.append({"role": "user", "content": user_content})
         request_body = {"messages": messages}
@@ -1153,7 +1188,7 @@ class LLaVAModel(LLaVAHuggingFaceModel):
         self.processor = processor
         self.tokenizer = tokenizer
 
-    def _generate(self, text_prompt, query_images=None, system_message=None):
+    def _generate(self, text_prompt, query_images):
 
         import torch
         from llava.constants import IMAGE_TOKEN_INDEX
@@ -1190,6 +1225,397 @@ class LLaVAModel(LLaVAHuggingFaceModel):
         return {
             "model_output": model_output,
             "response_time": response_time,
+        }
+
+# added this:
+@dataclass
+class VideoLLaVAModel(LLaVAHuggingFaceModel):
+    import torch
+    model_id: str = "LanguageBind/Video-LLaVA-7B-hf"
+    dtype: torch.dtype = torch.float16
+    device_map: str = "auto"
+    num_frames: int = 8
+    #requires_video: bool = True # instead of frames, passing mp4 video
+
+    def __post_init__(self):
+        from transformers import VideoLlavaForConditionalGeneration, VideoLlavaProcessor
+        self.model = VideoLlavaForConditionalGeneration.from_pretrained(self.model_id, torch_dtype=self.dtype).to("cuda")
+        self.processor = VideoLlavaProcessor.from_pretrained(self.model_id)
+
+    def preprocess_input(self, query_images, text_prompt):
+        import av
+        import numpy as np
+        #container = av.open(video_path)
+        # total_frames = container.streams.video[0].frames
+
+        # if end_frame_idx is None or end_frame_idx > total_frames:
+        #     end_frame_idx = total_frames
+
+        # indices = np.linspace(0, end_frame_idx - 1, self.num_frames).astype(int)
+
+        # frames = []
+        # for i, frame in enumerate(container.decode(video=0)):
+        #     if i > indices[-1]:
+        #         break
+        #     if i in indices:
+        #         frames.append(frame)
+
+        # video_array = np.stack([x.to_ndarray(format="rgb24") for x in frames])
+        prompt = f"USER: <video>\n{text_prompt} ASSISTANT:"
+        return self.processor(text=prompt, videos=query_images, return_tensors="pt").to(self.model.device)
+
+    def generate(self, text_prompt, query_images, **kwargs):
+        #wproperty = kwargs.get("wproperty", 0)         # default to 0 if not provided
+        #end_frame_idx = kwargs.get("end_frame_idx", None)  # default to None if not provided
+
+        # print("[DEBUG] - kwargs:", kwargs)  # ← temporary for testing
+        # print(f"[INFO] END FRAME IDX = {end_frame_idx}")
+        # print(f"[INFO] wproperty = {wproperty}")
+
+        #video_path = query_video_path[0] if isinstance(query_video_path, (list, tuple)) else query_video_path # we unpack it because we're storing it in a list
+        inputs = self.preprocess_input(query_images, text_prompt)
+        generate_ids = self.model.generate(**inputs, max_new_tokens=100)
+        decoded = self.processor.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+        return {
+            "model_output": decoded[0],
+            "is_valid": True
+            }
+
+@dataclass
+class VideoLLaVANeXTModel(LLaVAHuggingFaceModel):
+    import torch
+    model_id: str = "llava-hf/LLaVA-NeXT-Video-7B-hf"
+    dtype: torch.dtype = torch.float16
+    device_map: str = "cuda"
+    num_frames: int = 8
+
+    def __post_init__(self):
+        from transformers import LlavaNextVideoForConditionalGeneration, LlavaNextVideoProcessor
+        self.model = LlavaNextVideoForConditionalGeneration.from_pretrained(
+            self.model_id,
+            torch_dtype=self.dtype,
+            device_map=self.device_map
+        ).to("cuda")
+        self.processor = LlavaNextVideoProcessor.from_pretrained(self.model_id)
+
+    def preprocess_input(self, frame_images, text_prompt):
+        # frame_images: list of PIL.Image or numpy arrays
+        conversation = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": text_prompt},
+                {"type": "video"},
+            ]
+        }]
+        prompt = self.processor.apply_chat_template(conversation, add_generation_prompt=True)
+
+        return self.processor(
+            text=prompt,
+            videos=frame_images,
+            padding=True,
+            return_tensors="pt"
+        ).to(self.model.device)
+
+    def generate(self, text_prompt, query_images, **kwargs):
+        from PIL import Image
+
+        # query_video_path is now a list of frame paths
+        # frame_images = [Image.open(path).convert("RGB") for path in query_video_path]
+
+        inputs = self.preprocess_input(query_images, text_prompt)
+        generate_ids = self.model.generate(**inputs, max_new_tokens=200, temperature=1.0)
+        decoded = self.processor.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+
+        return {
+            "model_output": decoded[0],
+            "is_valid": True
+        }
+
+@dataclass
+class InternVLChatModel(HuggingFaceModel):
+
+    model_id: str = "OpenGVLab/Mini-InternVL-Chat-4B-V1-5"
+
+    def __post_init__(self):
+        import torch
+        from transformers import AutoModel
+        from lmdeploy import pipeline, TurbomindEngineConfig
+
+        self.model = AutoModel.from_pretrained(
+            self.model_id,
+            torch_dtype = torch.bfloat16,
+            low_cpu_mem_usage=True,
+            use_flash_attn=True,
+            trust_remote_code=True
+        ).eval().cuda()
+
+        self.pipe = pipeline(
+            self.model_id, 
+            backend_config=TurbomindEngineConfig(session_len=4096)
+        )
+
+    def generate(self, text_prompt, query_images):
+        from lmdeploy.vl.constants import IMAGE_TOKEN
+
+        # image tokens
+        image_token_str = "\n".join([f"Image-{i+1}: {IMAGE_TOKEN}" for i in range(len(query_images))])
+        
+        prompt = f"Consider the following sequence of images as frames from a video. {text_prompt}"
+
+        full_prompt = f"{image_token_str}\n{prompt}"
+
+        #print(f"DEBUG full_prompt:\n{full_prompt}")
+        #print(f"DEBUG num images: {len(query_images)}")
+    
+        response = self.pipe((full_prompt, query_images))
+        return {
+            "model_output": response.text,
+            "is_valid": True
+        }
+
+#########################3
+
+# @dataclass
+# class InternVLChatModel(HuggingFaceModel):
+
+#     model_id: str = "OpenGVLab/Mini-InternVL-Chat-4B-V1-5"
+#     requires_video: bool = True
+
+#     import torch
+#     import numpy as np
+#     from PIL import Image
+#     from decord import VideoReader, cpu
+#     import torchvision.transforms as T
+#     from torchvision.transforms.functional import InterpolationMode
+#     from transformers import AutoModel, AutoTokenizer
+
+#     def __post_init__(self):
+
+#         import torch
+#         from transformers import AutoModel
+#         from lmdeploy import pipeline, TurbomindEngineConfig
+#         from types import MethodType
+
+#         self.model = AutoModel.from_pretrained(
+#             self.model_id,
+#             torch_dtype = torch.bfloat16,
+#             low_cpu_mem_usage=True,
+#             use_flash_attn=True,
+#             trust_remote_code=True
+#         ).eval().cuda()
+
+#         self.pipe = pipeline(
+#             self.model_id, 
+#             backend_config=TurbomindEngineConfig(session_len=4096),
+#         )
+
+    
+
+#     def generate(self, text_prompt, query_video_path, **kwargs):
+#         from transformers import AutoTokenizer
+#         import torch
+
+#         video_path = query_video_path[0] if isinstance(query_video_path, (list, tuple)) else query_video_path
+#         #print(f"DEBUG: Video path is {video_path}")
+        
+#         IMAGENET_MEAN = (0.485, 0.456, 0.406)
+#         IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+#         def build_transform(input_size):
+#             import torchvision.transforms as T
+#             from torchvision.transforms.functional import InterpolationMode
+
+#             MEAN, STD = IMAGENET_MEAN, IMAGENET_STD
+#             transform = T.Compose([
+#                 T.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img),
+#                 T.Resize((input_size, input_size), interpolation=InterpolationMode.BICUBIC),
+#                 T.ToTensor(),
+#                 T.Normalize(mean=MEAN, std=STD)
+#             ])
+#             return transform
+        
+
+#         def find_closest_aspect_ratio(aspect_ratio, target_ratios, width, height, image_size):
+#             best_ratio_diff = float('inf')
+#             best_ratio = (1, 1)
+#             area = width * height
+#             for ratio in target_ratios:
+#                 target_aspect_ratio = ratio[0] / ratio[1]
+#                 ratio_diff = abs(aspect_ratio - target_aspect_ratio)
+#                 if ratio_diff < best_ratio_diff:
+#                     best_ratio_diff = ratio_diff
+#                     best_ratio = ratio
+#                 elif ratio_diff == best_ratio_diff:
+#                     if area > 0.5 * image_size * image_size * ratio[0] * ratio[1]:
+#                         best_ratio = ratio
+#             return best_ratio
+
+
+#         def dynamic_preprocess(image, min_num=1, max_num=12, image_size=448, use_thumbnail=False):
+#             orig_width, orig_height = image.size
+#             aspect_ratio = orig_width / orig_height
+
+#             # calculate the existing image aspect ratio
+#             target_ratios = set(
+#                 (i, j) for n in range(min_num, max_num + 1) for i in range(1, n + 1) for j in range(1, n + 1) if
+#                 i * j <= max_num and i * j >= min_num)
+#             target_ratios = sorted(target_ratios, key=lambda x: x[0] * x[1])
+
+#             # find the closest aspect ratio to the target
+#             target_aspect_ratio = find_closest_aspect_ratio(
+#                 aspect_ratio, target_ratios, orig_width, orig_height, image_size)
+
+#             # calculate the target width and height
+#             target_width = image_size * target_aspect_ratio[0]
+#             target_height = image_size * target_aspect_ratio[1]
+#             blocks = target_aspect_ratio[0] * target_aspect_ratio[1]
+
+#             # resize the image
+#             resized_img = image.resize((target_width, target_height))
+#             processed_images = []
+#             for i in range(blocks):
+#                 box = (
+#                     (i % (target_width // image_size)) * image_size,
+#                     (i // (target_width // image_size)) * image_size,
+#                     ((i % (target_width // image_size)) + 1) * image_size,
+#                     ((i // (target_width // image_size)) + 1) * image_size
+#                 )
+#                 # split the image
+#                 split_img = resized_img.crop(box)
+#                 processed_images.append(split_img)
+#             assert len(processed_images) == blocks
+#             if use_thumbnail and len(processed_images) != 1:
+#                 thumbnail_img = image.resize((image_size, image_size))
+#                 processed_images.append(thumbnail_img)
+#             return processed_images
+
+#         def get_index(bound, fps, max_frame, first_idx=0, num_segments=32):
+#             import numpy as np
+
+#             if bound:
+#                 start, end = bound[0], bound[1]
+#             else:
+#                 start, end = -100000, 100000
+#             start_idx = max(first_idx, round(start * fps))
+#             end_idx = min(round(end * fps), max_frame)
+#             seg_size = float(end_idx - start_idx) / num_segments
+#             frame_indices = np.array([
+#                 int(start_idx + (seg_size / 2) + np.round(seg_size * idx))
+#                 for idx in range(num_segments)
+#             ])
+#             return frame_indices
+
+#         def load_video(video_path, bound=None, input_size=448, max_num=1, num_segments=32):
+            
+#             from decord import VideoReader, cpu
+#             from PIL import Image
+
+#             vr = VideoReader(video_path, ctx=cpu(0), num_threads=1)
+#             max_frame = len(vr) - 1
+#             fps = float(vr.get_avg_fps())
+
+#             pixel_values_list, num_patches_list = [], []
+#             transform = build_transform(input_size=input_size)
+#             frame_indices = get_index(bound, fps, max_frame, first_idx=0, num_segments=num_segments)
+#             for frame_index in frame_indices:
+#                 img = Image.fromarray(vr[frame_index].asnumpy()).convert('RGB')
+#                 img = dynamic_preprocess(img, image_size=input_size, use_thumbnail=True, max_num=max_num)
+#                 pixel_values = [transform(tile) for tile in img]
+#                 pixel_values = torch.stack(pixel_values)
+#                 num_patches_list.append(pixel_values.shape[0])
+#                 pixel_values_list.append(pixel_values)
+#             pixel_values = torch.cat(pixel_values_list)
+#             return pixel_values, num_patches_list
+
+#         # Load video frames and get image tensor
+#         pixel_values, num_patches_list = load_video(video_path, num_segments=8, max_num=1)
+#         pixel_values = pixel_values.to(torch.bfloat16).cuda()
+
+#         # Build prompt with image tags
+#         video_prefix = ''.join([f'Frame{i+1}: <image>\n' for i in range(len(num_patches_list))])
+#         question = video_prefix + text_prompt
+
+#         # Generate output
+#         tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, use_fast=False)
+#         generation_config = dict(max_new_tokens=1024, do_sample=True)
+
+#         # print(f"DEBUG: (right before before model.chat) Video path is {video_path}")
+#         # response, history = self.model.chat(tokenizer, pixel_values, question, generation_config,
+#         #                        num_patches_list=num_patches_list, history=None, return_history=True)
+#         # print(f"DEBUG: (right after model.chat) Video path is {video_path}")
+
+#         response = self.pipe(question, [pixel_values], generation_config=generation_config)
+
+#         return {
+#             "model_output": response,
+#             "is_valid": True
+#         }
+
+@dataclass
+class QwenVLModel(HuggingFaceModel):
+    import torch
+
+    model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    dtype: str = "auto"
+    device_map: str = "auto"
+    #num_frames: int = 8 #(could change to 16)
+    #requires_video: bool = True 
+
+    def __post_init__(self):
+        from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor
+        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            self.model_id,
+            torch_dtype=self.dtype,
+            device_map=self.device_map,
+        )
+        self.processor = AutoProcessor.from_pretrained(self.model_id)
+
+    def generate(self, text_prompt, query_images):
+        from qwen_vl_utils import process_vision_info
+
+        print(f"[DEBUG] Number of query images: {len(query_images)}")
+        
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "video",
+                        "video": query_images,
+                        "max_pixels": 360 * 420,
+                        "fps": 30.0,
+                    },
+                    {"type": "text", "text": text_prompt},
+                ],
+            }
+        ]
+
+        text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+        image_inputs, video_inputs, video_kwargs = process_vision_info(messages, return_video_kwargs=True)
+
+        inputs = self.processor(
+            text=[text],
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+            **video_kwargs,
+        ).to(self.model.device)
+
+        generated_ids = self.model.generate(**inputs, max_new_tokens=300)
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+        ]
+
+        output_text = self.processor.batch_decode(
+            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )
+
+        return {
+            "model_output": output_text[0],
+            "is_valid": True,
         }
 
 
@@ -1555,17 +1981,33 @@ class ClaudeModel(EndpointModel, KeyBasedAuthMixIn):
             messages.extend(previous_messages)
         if query_images:
             encoded_images = self.base64encode(query_images)
-            user_content = [
-                {"type": "text", "text": text_prompt},
+
+
+            print("CLAUDE_MODEL: Number of images passed:", len(encoded_images))
+            print("CLAUDE_MODEL: Image used for input:", encoded_images[0])
+
+            # user_content = [
+            #     {"type": "text", "text": text_prompt},
+            #     {
+            #         "type": "image",
+            #         "source": {
+            #             "type": "base64",
+            #             "media_type": "image/jpeg",
+            #             "data": encoded_images[0],
+            #         },
+            #     },
+            # ]
+
+            user_content = [{"type": "text", "text": text_prompt}]
+            user_content.extend([
                 {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": encoded_images[0],
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/png;base64,{img}" #CHANGED THIS FROM [0]
                     },
-                },
-            ]
+                } for img in encoded_images # added loop
+            ])
+
         messages.append({"role": "user", "content": user_content})
 
         if system_message:

@@ -12,6 +12,8 @@ from .models import (
     LlamaServerlessAzureRestEndpointModel,
     LLaVAHuggingFaceModel,
     LLaVAModel,
+    VideoLLaVAModel,
+    VideoLLaVANeXTModel,
     LocalVLLMModel,
     MistralServerlessAzureRestEndpointModel,
     DeepseekR1ServerlessAzureRestEndpointModel,
@@ -20,7 +22,9 @@ from .models import (
     RestEndpointModel,
     TestModel,
     VLLMModel,
-    TogetherModel
+    TogetherModel,
+    InternVLChatModel,
+    QwenVLModel,
 )
 
 __all__ = [
@@ -41,9 +45,13 @@ __all__ = [
     LlamaServerlessAzureRestEndpointModel,
     DeepseekR1ServerlessAzureRestEndpointModel,
     LLaVAModel,
+    VideoLLaVAModel,
+    VideoLLaVANeXTModel,
     LocalVLLMModel,
     RestEndpointModel,
     TestModel,
     VLLMModel,
-    TogetherModel
+    TogetherModel,
+    InternVLChatModel,
+    QwenVLModel,
 ]
