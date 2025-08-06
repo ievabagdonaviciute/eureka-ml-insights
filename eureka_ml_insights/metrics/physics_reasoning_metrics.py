@@ -33,6 +33,8 @@ class PhysicsReasoningMetric(Metric): #subclass of metric
 
         return "correct" if ans == gold else "incorrect"
 
+############## WITHOUT LLM EXTRACTION
+
     # def extract(self, raw_answer: str) -> str:
     #     """
     #     Extracts the yes/no answer from the raw answer string.

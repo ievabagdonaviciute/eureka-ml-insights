@@ -1,0 +1,59 @@
+We asked a large language model the following question about a video (8 frames):
+
+BEGIN INITIAL QUESTION
+
+Question: {{ prompt }}
+
+END INITIAL QUESTION
+
+The model answered as follows:
+
+BEGIN RAW MODEL ANSWER
+
+Raw Model Answer: {{ raw_output }}
+
+END RAW MODEL ANSWER
+
+The correct answer is:
+
+BEGIN GROUND TRUTH ANSWER
+
+Ground Truth Answer: {{ ground_truth }}
+
+END GROUND TRUTH ANSWER
+
+Your task is to decide whether the model’s answer matches the ground truth.
+
+- If the model’s answer clearly matches the ground truth, return **correct**. “Clearly matches” means that even if the wording differs or it’s phrased slightly differently, the underlying meaning is the same.
+- If the model’s answer is wrong, incomplete, or unsure, return **incorrect**.
+
+Respond with exactly one word - `correct` or `incorrect` - and nothing else.
+
+<example solutions>
+
+BEGIN FIRST EXAMPLE SOLUTION 
+
+**Initial Question**: Which of the following is not responsible for the collision between the brown object and the cylinder? Choose one of the following choices: Choice 1: the yellow object's entrance; Choice 2: the presence of the gray sphere; Choice 3: the cylinder's colliding with the sphere.
+**Ground Truth Answer**: the yellow object's entrance
+**Raw Model Answer**: choice 1
+**Output**: correct
+
+END FIRST EXAMPLE SOLUTION 
+
+BEGIN SECOND EXAMPLE SOLUTION 
+
+**Initial Question**: Which of the following is not responsible for the collision between the brown object and the cylinder? Choose one of the following choices: Choice 1: the yellow object's entrance; Choice 2: the presence of the gray sphere; Choice 3: the cylinder's colliding with the sphere.
+**Ground Truth Answer**: the yellow object's entrance
+**Raw Model Answer**: the cylinder's colliding with the sphere
+**Output**: incorrect
+
+END SECOND EXAMPLE SOLUTION 
+
+BEGIN THIRD EXAMPLE SOLUTION 
+
+**Initial Question**: How many moving yellow objects are there when the video begins?
+**Ground Truth Answer**: 1
+**Raw Model Answer**: When the video begins, one object is moving.
+**Output**: correct
+
+END THIRD EXAMPLE SOLUTION 

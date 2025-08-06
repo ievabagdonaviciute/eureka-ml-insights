@@ -14,3 +14,8 @@ class StripAfterAssistantTransform:
         df[self.column] = df[self.column].apply(strip_response)
         return df
 
+
+class SortByClassAndUIDTransform:
+    def transform(self, df):
+        return df.sort_values(by="uid").reset_index(drop=True)
+
